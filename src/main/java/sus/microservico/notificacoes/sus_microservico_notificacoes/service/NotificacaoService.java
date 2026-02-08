@@ -4,63 +4,145 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import sus.microservico.notificacoes.sus_microservico_notificacoes.client.CoreServiceClient;
-import sus.microservico.notificacoes.sus_microservico_notificacoes.model.CirurgiaNotificacao;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.event.NotificacaoCirurgiaAtualizadaEvent;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.event.NotificacaoCirurgiaCanceladaEvent;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.event.NotificacaoCirurgiaCriadaEvent;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.model.Medico;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.model.Paciente;
 import sus.microservico.notificacoes.sus_microservico_notificacoes.model.TarefaAssistenteSocial;
 import sus.microservico.notificacoes.sus_microservico_notificacoes.model.enums.StatusTarefa;
-import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.CirurgiaNotificacaoRepository;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.MedicoRepository;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.PacienteRepository;
 import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.TarefaAssistenteSocialRepository;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 @Service
 @RequiredArgsConstructor
 public class NotificacaoService {
 
     private final Logger logger = LoggerFactory.getLogger(NotificacaoService.class);
-    private final CoreServiceClient coreClient;
+    private final PacienteRepository pacienteRepository;
+    private final MedicoRepository medicoRepository;
     private final TarefaAssistenteSocialRepository tarefaRepository;
-    private final CirurgiaNotificacaoRepository cirurgiaNotificacaoRepository;
 
-    public void processarNotificacao(CirurgiaNotificacao cirurgia) {
-        this.logger.info("Processando notificação para cirurgia {} do paciente {}", 
-            cirurgia.getCirurgiaId(), cirurgia.getPacienteId());
+    public void processarNotificacaoCriacao(NotificacaoCirurgiaCriadaEvent evento) {
+        logger.info("Processando notificação de criação para cirurgia {}", evento.cirurgiaId());
         
-        // 1. Consultar se paciente tem contato (REST ao core)
-        boolean temContato = coreClient.pacienteTemContato(cirurgia.getPacienteId());
+        Paciente paciente = pacienteRepository.findById(evento.pacienteId()).orElse(null);
+        Medico medico = medicoRepository.findById(evento.medicoId()).orElse(null);
         
-        if (temContato) {
-            // 2a. Enviar notificação digital (simulação: apenas log)
-            enviarNotificacaoDigital(cirurgia);
-        } else {
-            // 2b. Criar tarefa para assistente social
-            TarefaAssistenteSocial tarefa = new TarefaAssistenteSocial();
-            tarefa.setPacienteId(cirurgia.getPacienteId());
-            tarefa.setCirurgiaId(cirurgia.getCirurgiaId());
-            tarefa.setDescricao("Notificar paciente presencialmente sobre cirurgia " +
-                "dia " + cirurgia.getDataCirurgia() + " às " + cirurgia.getHoraCirurgia() +
-                " no local: " + cirurgia.getLocal());
-            tarefa.setStatus(StatusTarefa.PENDENTE);
-            tarefa.setDataCriacao(LocalDateTime.now());
-            tarefaRepository.save(tarefa);
-            this.logger.info("Tarefa criada para assistente social notificar paciente {} presencialmente", 
-                cirurgia.getPacienteId());
+        if (paciente == null) {
+            logger.warn("Paciente {} não encontrado", evento.pacienteId());
+            return;
         }
         
-        // 3. Marcar como notificada
-        cirurgia.setNotificacaoEnviada(true);
-        cirurgia.setDataNotificacao(LocalDateTime.now());
-        cirurgiaNotificacaoRepository.save(cirurgia);
-        this.logger.info("Cirurgia {} marcada como notificada", cirurgia.getCirurgiaId());
+        String mensagem = String.format(
+                "Cirurgia agendada para %s às %s no local: %s",
+                evento.dataCirurgia().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                evento.horaCirurgia().format(DateTimeFormatter.ofPattern("HH:mm")),
+                evento.local()
+        );
+        
+        enviarNotificacoes(paciente, medico, "AGENDAMENTO", mensagem);
     }
 
-    private void enviarNotificacaoDigital(CirurgiaNotificacao cirurgia) {
-        // Simulação (MVP): apenas log
-        this.logger.info("==========================================================");
-        this.logger.info("NOTIFICAÇÃO DIGITAL enviada ao paciente {}", cirurgia.getPacienteId());
-        this.logger.info("Cirurgia agendada para {} às {}", cirurgia.getDataCirurgia(), cirurgia.getHoraCirurgia());
-        this.logger.info("Local: {}", cirurgia.getLocal());
-        this.logger.info("==========================================================");
-        // Futuramente: integrar com serviço de e-mail/SMS
+    public void processarNotificacaoAtualizacao(NotificacaoCirurgiaAtualizadaEvent evento) {
+        logger.info("Processando notificação de atualização para cirurgia {}", evento.cirurgiaId());
+        
+        Paciente paciente = pacienteRepository.findById(evento.pacienteId()).orElse(null);
+        Medico medico = medicoRepository.findById(evento.medicoId()).orElse(null);
+        
+        if (paciente == null) {
+            logger.warn("Paciente {} não encontrado", evento.pacienteId());
+            return;
+        }
+        
+        String mensagem = String.format(
+                "Cirurgia ATUALIZADA para %s às %s no local: %s",
+                evento.dataCirurgia().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                evento.horaCirurgia().format(DateTimeFormatter.ofPattern("HH:mm")),
+                evento.local()
+        );
+        
+        enviarNotificacoes(paciente, medico, "ATUALIZAÇÃO", mensagem);
+    }
+
+    public void processarNotificacaoCancelamento(NotificacaoCirurgiaCanceladaEvent evento) {
+        logger.info("Processando notificação de cancelamento para cirurgia {}", evento.cirurgiaId());
+        
+        Paciente paciente = pacienteRepository.findById(evento.pacienteId()).orElse(null);
+        Medico medico = medicoRepository.findById(evento.medicoId()).orElse(null);
+        
+        if (paciente == null) {
+            logger.warn("Paciente {} não encontrado", evento.pacienteId());
+            return;
+        }
+        
+        String mensagem = String.format(
+                "Cirurgia CANCELADA que estava agendada para %s às %s",
+                evento.dataCirurgia().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                evento.horaCirurgia().format(DateTimeFormatter.ofPattern("HH:mm"))
+        );
+        
+        enviarNotificacoes(paciente, medico, "CANCELAMENTO", mensagem);
+    }
+
+    private void enviarNotificacoes(Paciente paciente, Medico medico, String tipo, String mensagem) {
+        boolean pacienteNotificado = false;
+        boolean medicoNotificado = false;
+        
+        // Notificar paciente
+        if (paciente.getEmail() != null && !paciente.getEmail().isBlank()) {
+            enviarEmail(paciente.getEmail(), tipo, mensagem);
+            pacienteNotificado = true;
+        }
+        
+        if (paciente.getTelefone() != null && !paciente.getTelefone().isBlank()) {
+            enviarSMS(paciente.getTelefone(), mensagem);
+            pacienteNotificado = true;
+        }
+        
+        // Se paciente não tem contato, criar tarefa para assistente social
+        if (!pacienteNotificado) {
+            criarTarefaAssistenteSocial(paciente.getId(), mensagem);
+        }
+        
+        // Notificar médico (se existir e tiver email)
+        if (medico != null && medico.getEmail() != null && !medico.getEmail().isBlank()) {
+            enviarEmail(medico.getEmail(), tipo, mensagem);
+            medicoNotificado = true;
+        }
+        
+        logger.info("Notificações enviadas - Paciente: {}, Médico: {}", pacienteNotificado, medicoNotificado);
+    }
+
+    private void enviarEmail(String email, String tipo, String mensagem) {
+        logger.info("==========================================================");
+        logger.info("EMAIL enviado para: {}", email);
+        logger.info("Tipo: {}", tipo);
+        logger.info("Mensagem: {}", mensagem);
+        logger.info("==========================================================");
+        // Futuramente: integrar com serviço de e-mail real
+    }
+
+    private void enviarSMS(String telefone, String mensagem) {
+        logger.info("==========================================================");
+        logger.info("SMS enviado para: {}", telefone);
+        logger.info("Mensagem: {}", mensagem);
+        logger.info("==========================================================");
+        // Futuramente: integrar com serviço de SMS real
+    }
+
+    private void criarTarefaAssistenteSocial(java.util.UUID pacienteId, String mensagem) {
+        TarefaAssistenteSocial tarefa = new TarefaAssistenteSocial();
+        tarefa.setPacienteId(pacienteId);
+        tarefa.setDescricao("Notificar paciente presencialmente: " + mensagem);
+        tarefa.setStatus(StatusTarefa.PENDENTE);
+        tarefa.setDataCriacao(LocalDateTime.now());
+        
+        tarefaRepository.save(tarefa);
+        logger.info("Tarefa criada para assistente social notificar paciente {} presencialmente", pacienteId);
     }
 }

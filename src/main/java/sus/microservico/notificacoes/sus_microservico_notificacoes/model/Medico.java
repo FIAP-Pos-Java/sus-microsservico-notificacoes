@@ -1,0 +1,22 @@
+package sus.microservico.notificacoes.sus_microservico_notificacoes.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.UUID;
+
+@Entity
+@Table(name = "tb_medico")
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class Medico {
+    
+    @Id
+    private UUID id;
+    
+    private String nome;
+    private String email;
+}
