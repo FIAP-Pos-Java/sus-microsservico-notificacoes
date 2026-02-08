@@ -5,8 +5,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.model.AssistenteSocial;
 import sus.microservico.notificacoes.sus_microservico_notificacoes.model.Cirurgia;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.model.Paciente;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.model.TarefaAssistenteSocial;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.model.enums.StatusTarefa;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.AssistenteSocialRepository;
 import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.CirurgiaRepository;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.PacienteRepository;
+import sus.microservico.notificacoes.sus_microservico_notificacoes.repository.TarefaAssistenteSocialRepository;
 import sus.microservico.notificacoes.sus_microservico_notificacoes.service.NotificacaoService;
 
 import java.time.LocalDate;
@@ -20,6 +27,9 @@ public class NotificacaoScheduler {
     private final Logger logger = LoggerFactory.getLogger(NotificacaoScheduler.class);
     private final NotificacaoService notificacaoService;
     private final CirurgiaRepository cirurgiaRepository;
+    private final PacienteRepository pacienteRepository;
+    private final TarefaAssistenteSocialRepository tarefaRepository;
+    private final AssistenteSocialRepository assistenteSocialRepository;
     
     private static final int DIAS_ANTECEDENCIA = 7;
 
@@ -42,10 +52,10 @@ public class NotificacaoScheduler {
             
             logger.info("Encontradas {} cirurgias para notificar", cirurgias.size());
             
-            // Para cada cirurgia, enviar lembrete apenas para o paciente
             for (Cirurgia cirurgia : cirurgias) {
                 try {
                     enviarLembreteCirurgia(cirurgia);
+                    enviarLembreteAssistenteSocial(cirurgia);
                     
                     // Marcar lembrete como enviado
                     cirurgia.setLembreteEnviado(true);
@@ -64,6 +74,14 @@ public class NotificacaoScheduler {
     }
     
     private void enviarLembreteCirurgia(Cirurgia cirurgia) {
+        Paciente paciente = pacienteRepository.findById(cirurgia.getPacienteId()).orElse(null);
+        
+        if (paciente == null) {
+            logger.warn("Paciente {} não encontrado para cirurgia {}", 
+                       cirurgia.getPacienteId(), cirurgia.getId());
+            return;
+        }
+        
         String mensagem = String.format(
                 "LEMBRETE: Sua cirurgia está agendada para %s às %s no local: %s. " +
                 "Por favor, siga as orientações médicas de preparo.",
@@ -72,10 +90,59 @@ public class NotificacaoScheduler {
                 cirurgia.getLocal()
         );
         
-        logger.info("Enviando lembrete para paciente {} - Cirurgia {}", 
-                cirurgia.getPacienteId(), cirurgia.getId());
+        logger.info("Enviando lembrete para paciente {} ({}) - Cirurgia {}", 
+                   paciente.getNome(), cirurgia.getPacienteId(), cirurgia.getId());
         
         notificacaoService.enviarLembretePaciente(cirurgia.getPacienteId(), mensagem);
+    }
+    
+    private void enviarLembreteAssistenteSocial(Cirurgia cirurgia) {
+        List<TarefaAssistenteSocial> tarefas = tarefaRepository.findAll().stream()
+                .filter(t -> t.getCirurgiaId() != null && t.getCirurgiaId().equals(cirurgia.getId()))
+                .filter(t -> t.getStatus() == StatusTarefa.PENDENTE || t.getStatus() == StatusTarefa.EM_ANDAMENTO)
+                .filter(t -> t.getAssistenteSocialId() != null)
+                .toList();
+        
+        if (tarefas.isEmpty()) {
+            logger.info("Nenhuma tarefa pendente/em andamento encontrada para cirurgia {}", cirurgia.getId());
+            return;
+        }
+        
+        logger.info("Encontradas {} tarefas para notificar assistentes sociais sobre cirurgia {}", 
+                   tarefas.size(), cirurgia.getId());
+        
+        for (TarefaAssistenteSocial tarefa : tarefas) {
+            try {
+                AssistenteSocial assistente = assistenteSocialRepository.findById(tarefa.getAssistenteSocialId())
+                        .orElse(null);
+                
+                if (assistente == null) {
+                    logger.warn("Assistente social {} não encontrada para tarefa {}", 
+                               tarefa.getAssistenteSocialId(), tarefa.getId());
+                    continue;
+                }
+                
+                Paciente paciente = pacienteRepository.findById(cirurgia.getPacienteId()).orElse(null);
+                String nomePaciente = paciente != null ? paciente.getNome() : "Paciente ID: " + cirurgia.getPacienteId();
+                
+                String mensagem = String.format(
+                        "LEMBRETE: O paciente %s possui cirurgia agendada para %s às %s no local: %s. ",
+                        nomePaciente,
+                        cirurgia.getDataCirurgia().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                        cirurgia.getHoraCirurgia().format(DateTimeFormatter.ofPattern("HH:mm")),
+                        cirurgia.getLocal()
+                );
+                
+                logger.info("Enviando lembrete para assistente social {} ({}) sobre cirurgia {}", 
+                           assistente.getNome(), assistente.getId(), cirurgia.getId());
+                
+                notificacaoService.enviarLembreteAssistenteSocial(assistente, mensagem);
+                
+            } catch (Exception e) {
+                logger.error("Erro ao notificar assistente social sobre tarefa {}: {}", 
+                            tarefa.getId(), e.getMessage());
+            }
+        }
     }
 
     // Método para testes - executa a cada 2 minutos (descomente se quiser testar)

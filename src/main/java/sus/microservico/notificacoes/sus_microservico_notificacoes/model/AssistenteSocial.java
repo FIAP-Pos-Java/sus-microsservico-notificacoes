@@ -1,0 +1,24 @@
+package sus.microservico.notificacoes.sus_microservico_notificacoes.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.UUID;
+
+@Entity
+@Table(name = "tb_usuario_assistente_social")
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class AssistenteSocial {
+    
+    @Id
+    private UUID id;
+    
+    private String nome;
+    private String email;
+    private String matricula;
+    private String telefoneContato;
+}
