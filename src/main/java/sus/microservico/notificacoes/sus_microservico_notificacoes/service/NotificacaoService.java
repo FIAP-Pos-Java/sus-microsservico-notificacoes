@@ -63,23 +63,51 @@ public class NotificacaoService {
     }
 
     public void processarNotificacaoCriacao(NotificacaoCirurgiaCriadaEvent evento) {
-        logger.info("Processando notificação de criação para cirurgia {}", evento.cirurgiaId());
-        
-        Paciente paciente = pacienteRepository.findById(evento.pacienteId()).orElse(null);
-        
-        if (paciente == null) {
-            logger.warn("Paciente {} não encontrado", evento.pacienteId());
-            return;
+        try {
+            logger.info("==========================================================");
+            logger.info("PROCESSANDO NOTIFICAÇÃO DE CRIAÇÃO");
+            logger.info("Cirurgia ID: {}", evento.cirurgiaId());
+            logger.info("Paciente ID: {}", evento.pacienteId());
+            logger.info("==========================================================");
+            
+            Paciente paciente = pacienteRepository.findById(evento.pacienteId()).orElse(null);
+            
+            if (paciente == null) {
+                logger.error("==========================================================");
+                logger.error("PACIENTE NÃO ENCONTRADO");
+                logger.error("Paciente ID: {}", evento.pacienteId());
+                logger.error("Tabela: tb_usuario_paciente");
+                logger.error("Verifique se o paciente foi cadastrado corretamente!");
+                logger.error("==========================================================");
+                return;
+            }
+            
+            logger.info("Paciente encontrado: {}", paciente.getNome());
+            logger.info("E-mail: {}", paciente.getEmail() != null ? paciente.getEmail() : "(não possui)");
+            logger.info("Telefone: {}", paciente.getTelefone() != null ? paciente.getTelefone() : "(não possui)");
+            
+            String mensagem = String.format(
+                    "Cirurgia agendada para %s às %s no local: %s",
+                    evento.dataCirurgia().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
+                    evento.horaCirurgia().format(DateTimeFormatter.ofPattern("HH:mm")),
+                    evento.local()
+            );
+            
+            enviarNotificacoes(paciente, "AGENDAMENTO", mensagem);
+            
+            logger.info("==========================================================");
+            logger.info("✓ NOTIFICAÇÃO PROCESSADA COM SUCESSO");
+            logger.info("==========================================================");
+        } catch (Exception e) {
+            logger.error("==========================================================");
+            logger.error("ERRO AO PROCESSAR NOTIFICAÇÃO DE CRIAÇÃO");
+            logger.error("Cirurgia ID: {}", evento.cirurgiaId());
+            logger.error("Paciente ID: {}", evento.pacienteId());
+            logger.error("Erro: {}", e.getMessage());
+            logger.error("Stack trace:", e);
+            logger.error("==========================================================");
+            throw e;
         }
-        
-        String mensagem = String.format(
-                "Cirurgia agendada para %s às %s no local: %s",
-                evento.dataCirurgia().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")),
-                evento.horaCirurgia().format(DateTimeFormatter.ofPattern("HH:mm")),
-                evento.local()
-        );
-        
-        enviarNotificacoes(paciente, "AGENDAMENTO", mensagem);
     }
 
     public void processarNotificacaoAtualizacao(NotificacaoCirurgiaAtualizadaEvent evento) {
@@ -122,33 +150,69 @@ public class NotificacaoService {
     }
 
     private void enviarNotificacoes(Paciente paciente, String tipo, String mensagem) {
+        logger.info("----------------------------------------------------------");
+        logger.info("INICIANDO ENVIO DE NOTIFICAÇÕES");
+        logger.info("Paciente: {}", paciente.getNome());
+        logger.info("----------------------------------------------------------");
+        
         boolean pacienteNotificado = false;
         
-        // Notificar paciente
+        // Notificar paciente por e-mail
         if (paciente.getEmail() != null && !paciente.getEmail().isBlank()) {
-            enviarEmail(paciente.getEmail(), tipo, mensagem);
-            pacienteNotificado = true;
+            logger.info("📧 Paciente possui e-mail. Tentando enviar...");
+            boolean emailEnviado = enviarEmail(paciente.getEmail(), tipo, mensagem);
+            if (emailEnviado) {
+                pacienteNotificado = true;
+                logger.info("E-mail marcado como enviado");
+            } else {
+                logger.warn("E-mail NÃO foi enviado com sucesso");
+            }
+        } else {
+            logger.info("Paciente NÃO possui e-mail cadastrado");
         }
         
+        // Notificar paciente por SMS
         if (paciente.getTelefone() != null && !paciente.getTelefone().isBlank()) {
-            enviarSMS(paciente.getTelefone(), mensagem);
-            pacienteNotificado = true;
+            logger.info("📱 Paciente possui telefone. Tentando enviar SMS...");
+            boolean smsEnviado = enviarSMS(paciente.getTelefone(), mensagem);
+            if (smsEnviado) {
+                pacienteNotificado = true;
+                logger.info("✓ SMS marcado como enviado");
+            } else {
+                logger.warn("⚠ SMS NÃO foi enviado com sucesso");
+            }
+        } else {
+            logger.info("ℹ Paciente NÃO possui telefone cadastrado");
         }
         
         // Se paciente não tem contato, criar tarefa para assistente social
         if (!pacienteNotificado) {
+            logger.warn("⚠ PACIENTE NÃO FOI NOTIFICADO (sem e-mail e sem telefone)");
+            logger.info("Criando tarefa para Assistente Social...");
             criarTarefaAssistenteSocial(paciente.getId(), mensagem);
+        } else {
+            logger.info("✓ Paciente foi notificado com sucesso!");
         }
         
-        logger.info("Notificações enviadas - Paciente: {}", pacienteNotificado);
+        logger.info("----------------------------------------------------------");
+        logger.info("✓ ENVIO DE NOTIFICAÇÕES CONCLUÍDO");
+        logger.info("Paciente notificado: {}", pacienteNotificado ? "SIM" : "NÃO (Tarefa criada para AS)");
+        logger.info("----------------------------------------------------------");
     }
 
-    private void enviarEmail(String email, String tipo, String mensagem) {
+    private boolean enviarEmail(String email, String tipo, String mensagem) {
         try {
+            logger.info("   → Verificando configuração de e-mail...");
+            
             if (emailFrom == null || emailFrom.isBlank()) {
-                logger.warn("E-mail de origem não configurado. Mensagem não enviada para: {}", email);
-                return;
+                logger.error("   ❌ E-MAIL DE ORIGEM NÃO CONFIGURADO!");
+                logger.error("   Verifique a variável MAIL_USERNAME no .env");
+                logger.error("   Valor atual: {}", emailFrom);
+                return false;
             }
+            
+            logger.info("   ✓ E-mail de origem configurado: {}", emailFrom);
+            logger.info("   → Criando mensagem de e-mail...");
             
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(emailFrom);
@@ -156,28 +220,59 @@ public class NotificacaoService {
             message.setSubject("SusTech - Notificação de " + tipo);
             message.setText(mensagem);
             
+            logger.info("   → Enviando e-mail via JavaMailSender...");
+            logger.info("   De: {}", emailFrom);
+            logger.info("   Para: {}", email);
+            logger.info("   Assunto: SusTech - Notificação de {}", tipo);
+            
             mailSender.send(message);
             
             logger.info("==========================================================");
-            logger.info("EMAIL enviado com sucesso para: {}", email);
+            logger.info("✅ EMAIL ENVIADO COM SUCESSO!");
+            logger.info("Destinatário: {}", email);
             logger.info("Tipo: {}", tipo);
             logger.info("Mensagem: {}", mensagem);
             logger.info("==========================================================");
+            return true;
         } catch (Exception e) {
-            logger.error("Erro ao enviar e-mail para {}: {}", email, e.getMessage());
+            logger.error("==========================================================");
+            logger.error("❌ ERRO AO ENVIAR E-MAIL");
+            logger.error("Destinatário: {}", email);
+            logger.error("E-mail de origem: {}", emailFrom);
+            logger.error("Tipo de erro: {}", e.getClass().getSimpleName());
+            logger.error("Mensagem de erro: {}", e.getMessage());
+            logger.error("Stack trace:", e);
+            logger.error("----------------------------------------------------------");
+            logger.error("POSSÍVEIS CAUSAS:");
+            logger.error("1. Credenciais do Gmail incorretas no .env");
+            logger.error("2. Senha de app do Gmail não configurada");
+            logger.error("3. Servidor SMTP não acessível (smtp.gmail.com:587)");
+            logger.error("4. Autenticação de 2 fatores não habilitada no Gmail");
+            logger.error("==========================================================");
+            return false;
         }
     }
 
-    private void enviarSMS(String telefone, String mensagem) {
+    private boolean enviarSMS(String telefone, String mensagem) {
         try {
+            logger.info("   → Verificando configuração do Twilio...");
+            
             if (twilioPhoneNumber == null || twilioPhoneNumber.isBlank()) {
-                logger.warn("Número do Twilio não configurado. SMS não enviado para: {}", telefone);
-                return;
+                logger.warn("   ⚠ TWILIO NÃO CONFIGURADO");
+                logger.warn("   SMS não será enviado (isso é opcional)");
+                logger.warn("   Para habilitar SMS, configure as variáveis TWILIO_* no .env");
+                return false;
             }
+            
+            logger.info("   ✓ Twilio configurado");
+            logger.info("   → Formatando número de telefone...");
             
             // formato internacional
             String telefoneFormatado = telefone.startsWith("+") ? telefone : "+55" + telefone.replaceAll("[^0-9]", "");
+            logger.info("   Número original: {}", telefone);
+            logger.info("   Número formatado: {}", telefoneFormatado);
             
+            logger.info("   → Enviando SMS via Twilio...");
             Message message = Message.creator(
                     new PhoneNumber(telefoneFormatado),
                     new PhoneNumber(twilioPhoneNumber),
@@ -185,24 +280,59 @@ public class NotificacaoService {
             ).create();
             
             logger.info("==========================================================");
-            logger.info("SMS enviado com sucesso para: {}", telefone);
-            logger.info("SID: {}", message.getSid());
+            logger.info("✅ SMS ENVIADO COM SUCESSO!");
+            logger.info("Destinatário: {}", telefone);
+            logger.info("Twilio SID: {}", message.getSid());
             logger.info("Mensagem: {}", mensagem);
             logger.info("==========================================================");
+            return true;
         } catch (Exception e) {
-            logger.error("Erro ao enviar SMS para {}: {}", telefone, e.getMessage());
+            logger.error("==========================================================");
+            logger.error("❌ ERRO AO ENVIAR SMS");
+            logger.error("Destinatário: {}", telefone);
+            logger.error("Número Twilio: {}", twilioPhoneNumber);
+            logger.error("Tipo de erro: {}", e.getClass().getSimpleName());
+            logger.error("Mensagem de erro: {}", e.getMessage());
+            logger.error("Stack trace:", e);
+            logger.error("----------------------------------------------------------");
+            logger.error("POSSÍVEIS CAUSAS:");
+            logger.error("1. Credenciais do Twilio incorretas no .env");
+            logger.error("2. Número de telefone do Twilio não verificado");
+            logger.error("3. Saldo insuficiente na conta Twilio");
+            logger.error("4. Número de destino inválido");
+            logger.error("==========================================================");
+            return false;
         }
     }
 
     private void criarTarefaAssistenteSocial(java.util.UUID pacienteId, String mensagem) {
-        TarefaAssistenteSocial tarefa = new TarefaAssistenteSocial();
-        tarefa.setPacienteId(pacienteId);
-        tarefa.setDescricao("Notificar paciente presencialmente: " + mensagem);
-        tarefa.setStatus(StatusTarefa.PENDENTE);
-        tarefa.setDataCriacao(LocalDateTime.now());
-        
-        tarefaRepository.save(tarefa);
-        logger.info("Tarefa criada para assistente social notificar paciente {} presencialmente", pacienteId);
+        try {
+            logger.info("   → Criando tarefa para Assistente Social...");
+            
+            TarefaAssistenteSocial tarefa = new TarefaAssistenteSocial();
+            tarefa.setPacienteId(pacienteId);
+            tarefa.setDescricao("Notificar paciente presencialmente: " + mensagem);
+            tarefa.setStatus(StatusTarefa.PENDENTE);
+            tarefa.setDataCriacao(LocalDateTime.now());
+            
+            TarefaAssistenteSocial tarefaSalva = tarefaRepository.save(tarefa);
+            
+            logger.info("==========================================================");
+            logger.info("✅ TAREFA CRIADA PARA ASSISTENTE SOCIAL");
+            logger.info("Tarefa ID: {}", tarefaSalva.getId());
+            logger.info("Paciente ID: {}", pacienteId);
+            logger.info("Status: {}", StatusTarefa.PENDENTE);
+            logger.info("Descrição: {}", tarefaSalva.getDescricao());
+            logger.info("==========================================================");
+        } catch (Exception e) {
+            logger.error("==========================================================");
+            logger.error("❌ ERRO AO CRIAR TAREFA PARA ASSISTENTE SOCIAL");
+            logger.error("Paciente ID: {}", pacienteId);
+            logger.error("Erro: {}", e.getMessage());
+            logger.error("Stack trace:", e);
+            logger.error("==========================================================");
+            throw e;
+        }
     }
     
     public void enviarLembretePaciente(java.util.UUID pacienteId, String mensagem) {

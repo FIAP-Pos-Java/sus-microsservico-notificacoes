@@ -20,8 +20,28 @@ public class NotificacaoConsumer {
 
     @RabbitListener(queues = RabbitMQConfig.CIRURGIA_CRIADA_QUEUE)
     public void receberNotificacaoCirurgiaCriada(NotificacaoCirurgiaCriadaEvent evento) {
-        logger.info("Evento de notificação de criação recebido para cirurgia {}", evento.cirurgiaId());
-        notificacaoService.processarNotificacaoCriacao(evento);
+        try {
+            logger.info("==========================================================");
+            logger.info("EVENTO DE NOTIFICAÇÃO RECEBIDO (CONSUMER)");
+            logger.info("Cirurgia ID: {}", evento.cirurgiaId());
+            logger.info("Paciente ID: {}", evento.pacienteId());
+            logger.info("Médico ID: {}", evento.medicoId());
+            
+            notificacaoService.processarNotificacaoCriacao(evento);
+            
+            logger.info("==========================================================");
+            logger.info("NOTIFICAÇÃO PROCESSADA COM SUCESSO");
+            logger.info("==========================================================");
+        } catch (Exception e) {
+            logger.error("==========================================================");
+            logger.error("ERRO NO CONSUMER DE NOTIFICAÇÃO");
+            logger.error("Cirurgia ID: {}", evento.cirurgiaId());
+            logger.error("Paciente ID: {}", evento.pacienteId());
+            logger.error("Erro: {}", e.getMessage());
+            logger.error("Stack trace:", e);
+            logger.error("==========================================================");
+            throw e;
+        }
     }
 
     @RabbitListener(queues = RabbitMQConfig.CIRURGIA_ATUALIZADA_QUEUE)

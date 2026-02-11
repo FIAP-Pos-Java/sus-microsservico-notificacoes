@@ -40,6 +40,9 @@ build/
 *.class
 *.log
 
+# Environment variables
+.env
+
 ### Java ###
 # Compiled class file
 *.class
