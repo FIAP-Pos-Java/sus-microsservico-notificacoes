@@ -1,4 +1,4 @@
-# SUS - Microserviço de Notificações
+# SUS - Microsserviço de Notificações
 
 ## Configuração
 
